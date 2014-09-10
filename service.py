@@ -243,7 +243,7 @@ class Service(threading.Thread):
 		try:
 			return self.clients[addr]
 		except KeyError:
-			cli=Client(addr)
+			cli=Client(addr, self)
 			self.clients[addr]=cli
 			return cli
 	def SendPacket(self, cli, **kwargs):
