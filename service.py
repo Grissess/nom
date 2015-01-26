@@ -28,6 +28,9 @@ import serialize
 import packet
 import proxy
 
+class NOMError(Exception):
+    pass
+
 class LoggedSocket(object):
 	def __init__(self, sock):
 		self.sock=sock
@@ -48,19 +51,31 @@ class Deferred(object):
 	@classmethod
 	def SetTimeout(cls, tmout):
 		cls.TIMEOUT=tmout
-	def __init__(self, filt=None):
+	def __init__(self, filt=None, onwait=None):
 		self.filt=filt
+		self.onwait=onwait
 		self.queue=Queue.Queue()
 	def Wait(self):
-		while True:
-			self.WAITING.add(self)
-			with self.CONDITION:
+		with self.CONDITION:
+			self.Go()
+			while True:
 				self.CONDITION.wait(self.TIMEOUT)
-			while not self.queue.empty():
-				obj=self.queue.get()
-				if self.filt and self.filt(obj):
-					self.WAITING.discard(self)
-					return obj
+				catch, res = self.Process()
+				if catch:
+					return res
+			
+	def Go(self):
+		with self.CONDITION:
+			self.WAITING.add(self)
+			if self.onwait:
+				self.onwait()
+	def Process(self):
+		while not self.queue.empty():
+			obj=self.queue.get()
+			if self.filt and self.filt(obj):
+				self.WAITING.discard(self)
+				return (True, obj)
+		return (False, None)
 	def Accept(self, obj):
 		self.queue.put(obj)
 	@classmethod
@@ -74,23 +89,28 @@ class Deferred(object):
 		cls.Wake()
 		
 class DeferredResult(Deferred):
-	def __init__(self, xid):
-		Deferred.__init__(self, lambda obj, self=self: obj.xid == self.xid)
+	def __init__(self, srv, xid, onwait=None):
+		Deferred.__init__(self, lambda obj, self=self: obj.xid == self.xid, onwait)
+		self.srv=srv
 		self.xid=xid
 		self.result=None
 		self.ready=False
 	def GetResult(self):
 		if not self.ready:
 			raise RuntimeError('Value not available yet')
-		if self.result.Has('result'):
-			return self.result.result
+		if self.result.Has('error'):
+			raise pkt.result.error
 		else:
-			raise self.result.error
+			return self.result.result
 	def Wait(self):
 		if not self.ready:
 			#print id(self), 'Waiting on transaction', self.xid
 			self.result=Deferred.Wait(self)
 			#print id(self), 'Transaction complete:', self.xid
+			try:
+				del self.srv.outstanding[self.xid]
+			except KeyError:
+				pass
 			self.ready=True
 		return self.GetResult()
 	def Accept(self, obj):
@@ -125,50 +145,53 @@ class RemoteReference(object):
 		self.cli=cli
 		self.oid=oid
 		self.blocking=True
+		self.pushdata={}
 	def GetAttr(self, attr):
+		if attr in self.pushdata:
+			return self.pushdata[attr]
 		if self.blocking:
 			return self.srv.GetAttr(self.cli, self.oid, attr).Wait()
-		return self.srv.GetAttr(self.cli, self.oid, attr).Wait()
+		return self.srv.GetAttr(self.cli, self.oid, attr)
 	def SetAttr(self, attr, val):
 		if self.blocking:
 			self.srv.SetAttr(self.cli, self.oid, attr, val).Wait()
 		else:
-			self.srv.SetAttr(self.cli, self.oid, attr, val).Wait()
+			self.srv.SetAttr(self.cli, self.oid, attr, val)
 	def DelAttr(self, attr):
 		if self.blocking:
 			self.srv.DelAttr(self.cli, self.oid, attr).Wait()
 		else:
-			self.srv.DelAttr(self.cli, self.oid, attr).Wait()
+			self.srv.DelAttr(self.cli, self.oid, attr)
 	def GetItem(self, item):
 		if self.blocking:
 			return self.srv.GetItem(self.cli, self.oid, item).Wait()
-		return self.srv.GetItem(self.cli, self.oid, item).Wait()
+		return self.srv.GetItem(self.cli, self.oid, item)
 	def SetItem(self, item, val):
 		if self.blocking:
 			self.srv.SetItem(self.cli, self.oid, item, val).Wait()
 		else:
-			self.srv.SetItem(self.cli, self.oid, item, val).Wait()
+			self.srv.SetItem(self.cli, self.oid, item, val)
 	def DelItem(self, item):
 		if self.blocking:
 			self.srv.Delitem(self.cli, self.oid, item).Wait()
 		else:
-			self.srv.Delitem(self.cli, self.oid, item).Wait()
+			self.srv.Delitem(self.cli, self.oid, item)
 	def Len(self):
 		if self.blocking:
 			return self.srv.Len(self.cli, self.oid).Wait()
-		return self.srv.Len(self.cli, self.oid).Wait()
+		return self.srv.Len(self.cli, self.oid)
 	def Repr(self):
 		if self.blocking:
 			return self.srv.Repr(self.cli, self.oid).Wait()
-		return self.srv.Repr(self.cli, self.oid).Wait()
+		return self.srv.Repr(self.cli, self.oid)
 	def Str(self):
 		if self.blocking:
 			return self.srv.Str(self.cli, self.oid).Wait()
-		return self.srv.Str(self.cli, self.oid).Wait()
+		return self.srv.Str(self.cli, self.oid)
 	def Call(self, *args, **kwargs):
 		if self.blocking:
 			return self.srv.Call(self.cli, self.oid, *args, **kwargs).Wait()
-		return self.srv.Call(self.cli, self.oid, *args, **kwargs).Wait()
+		return self.srv.Call(self.cli, self.oid, *args, **kwargs)
 		
 class CMD:
 	SYNC=0
@@ -176,6 +199,7 @@ class CMD:
 	PULL=2
 	RESOLVE=3
 	LIST=4
+	PUSH=5
 CMD.NAMES=dict(zip(CMD.__dict__.values(), CMD.__dict__.keys()))
 	
 class Client(object):
@@ -213,7 +237,7 @@ class Service(threading.Thread):
 		self.auth=auth or Authorizor()
 		self.omap={} #id -> object tracked
 		self.pubmap={} #public object name -> id
-		self.actions={} #xid -> Deferred
+		self.outstanding={} #xid -> Deferred
 		self.clients={} #addr -> Client
 		serialize.SetSerializer(object, ObjectTranslator(self))
 	def Connect(self, addr):
@@ -253,9 +277,8 @@ class Service(threading.Thread):
 			del kwargs['_cmd']
 		else:
 			cmd=CMD.PULL
-		self.sock.sendto(str(packet.Packet(cmd, xid=xid, **kwargs)), cli.addr)
-		act=DeferredResult(xid)
-		self.actions[xid]=act
+		act=DeferredResult(self, xid, lambda self=self, xid=xid, cmd=cmd, kwargs=kwargs, cli=cli: self.sock.sendto(str(packet.Packet(cmd, xid=xid, **kwargs)), cli.addr))
+		self.outstanding[xid]=act
 		return act
 	def GetAttr(self, cli, oid, attr):
 		return self.SendPacket(cli, op='GetAttr', oid=oid, attr=attr)
@@ -348,4 +371,3 @@ class Service(threading.Thread):
 	def pull_Unknown(self, obj, pkt, cli):
 		print 'Warning: Bad packet pull:', repr(pkt)
 		pkt.error=NameError('Unknown pull')
-		self.sock.sendto(str(pkt), cli.addr)
