@@ -99,7 +99,7 @@ class DeferredResult(Deferred):
 		if not self.ready:
 			raise RuntimeError('Value not available yet')
 		if self.result.Has('error'):
-			raise pkt.result.error
+			raise self.result.error
 		else:
 			return self.result.result
 	def Wait(self):
