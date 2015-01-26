@@ -151,47 +151,47 @@ class RemoteReference(object):
 			return self.pushdata[attr]
 		if self.blocking:
 			return self.srv.GetAttr(self.cli, self.oid, attr).Wait()
-		return self.srv.GetAttr(self.cli, self.oid, attr)
+		return self.srv.GetAttr(self.cli, self.oid, attr).Go()
 	def SetAttr(self, attr, val):
 		if self.blocking:
 			self.srv.SetAttr(self.cli, self.oid, attr, val).Wait()
 		else:
-			self.srv.SetAttr(self.cli, self.oid, attr, val)
+			self.srv.SetAttr(self.cli, self.oid, attr, val).Go()
 	def DelAttr(self, attr):
 		if self.blocking:
 			self.srv.DelAttr(self.cli, self.oid, attr).Wait()
 		else:
-			self.srv.DelAttr(self.cli, self.oid, attr)
+			self.srv.DelAttr(self.cli, self.oid, attr).Go()
 	def GetItem(self, item):
 		if self.blocking:
 			return self.srv.GetItem(self.cli, self.oid, item).Wait()
-		return self.srv.GetItem(self.cli, self.oid, item)
+		return self.srv.GetItem(self.cli, self.oid, item).Go()
 	def SetItem(self, item, val):
 		if self.blocking:
 			self.srv.SetItem(self.cli, self.oid, item, val).Wait()
 		else:
-			self.srv.SetItem(self.cli, self.oid, item, val)
+			self.srv.SetItem(self.cli, self.oid, item, val).Go()
 	def DelItem(self, item):
 		if self.blocking:
 			self.srv.Delitem(self.cli, self.oid, item).Wait()
 		else:
-			self.srv.Delitem(self.cli, self.oid, item)
+			self.srv.Delitem(self.cli, self.oid, item).Go()
 	def Len(self):
 		if self.blocking:
 			return self.srv.Len(self.cli, self.oid).Wait()
-		return self.srv.Len(self.cli, self.oid)
+		return self.srv.Len(self.cli, self.oid).Go()
 	def Repr(self):
 		if self.blocking:
 			return self.srv.Repr(self.cli, self.oid).Wait()
-		return self.srv.Repr(self.cli, self.oid)
+		return self.srv.Repr(self.cli, self.oid).Go()
 	def Str(self):
 		if self.blocking:
 			return self.srv.Str(self.cli, self.oid).Wait()
-		return self.srv.Str(self.cli, self.oid)
+		return self.srv.Str(self.cli, self.oid).Go()
 	def Call(self, *args, **kwargs):
 		if self.blocking:
 			return self.srv.Call(self.cli, self.oid, *args, **kwargs).Wait()
-		return self.srv.Call(self.cli, self.oid, *args, **kwargs)
+		return self.srv.Call(self.cli, self.oid, *args, **kwargs).Go()
 		
 class CMD:
 	SYNC=0
